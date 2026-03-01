@@ -13,6 +13,15 @@ interface CheckContactInput {
     email?: string;
 }
 
+export interface IdentifyResponse {
+    contact: {
+        primaryContactId: number;
+        emails: string[];
+        phoneNumbers: string[];
+        secondaryContactIds: number[];
+    };
+}
+
 export const createContact = async (input: CreateContactInput): Promise<Contact> => {
     return prisma.contact.create({
         data: input
@@ -41,4 +50,16 @@ export const findExistingContact = async (input: CheckContactInput): Promise<Con
     });
 
     return contact;
+};
+
+export const identifyContact = async (input: CheckContactInput): Promise<IdentifyResponse> => {
+    //Currently just returns a dummy response
+    return {
+        contact: {
+            primaryContactId: 0,
+            emails: [],
+            phoneNumbers: [],
+            secondaryContactIds: []
+        }
+    };
 };

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { createContact } from '../services/contact.service';
+import { identifyContact } from '../services/contact.service';
 
 // Interface for identify request body
 interface IdentifyRequest {
@@ -20,20 +20,12 @@ export const healthCheck = (req: Request, res: Response): void => {
 export const identify = async (req: Request, res: Response): Promise<void> => {
     const { email, phoneNumber } = req.body as IdentifyRequest;
 
-    // Create a new primary contact with the provided input
-    const contact = await createContact({
+    // Call the service to group and identify the customer
+    const identifyResponse = await identifyContact({
         email,
-        phoneNumber: phoneNumber ? String(phoneNumber) : undefined,
-        linkPrecedence: 'primary'
+        phoneNumber: phoneNumber ? String(phoneNumber) : undefined
     });
 
-    res.json({
-        contact: {
-            primaryContactId: contact.id,
-            emails: email ? [email] : [],
-            phoneNumbers: phoneNumber ? [String(phoneNumber)] : [],
-            secondaryContactIds: []
-        }
-    });
+    res.json(identifyResponse);
 };
 
