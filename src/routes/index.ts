@@ -1,10 +1,10 @@
-// Global file to handle all the routes
 
+// Global file to handle all the routes
 import { Router } from 'express';
-import routes from './contact.routes';
+import contactRoutes from './contact.routes';
 
 const router = Router();
 
-router.use('/', routes);
+router.use('/', contactRoutes);
 
 export default router;
