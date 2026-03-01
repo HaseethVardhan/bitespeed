@@ -28,19 +28,16 @@ export const createContact = async (input: CreateContactInput): Promise<Contact>
     });
 };
 
-/**
- * Checks if a contact exists with the given phoneNumber or email
- * @param input - Object containing phoneNumber and/or email
- * @returns The existing contact if found, null otherwise
- */
-export const findExistingContact = async (input: CheckContactInput): Promise<Contact | null> => {
+export const identifyContact = async (input: CheckContactInput): Promise<IdentifyResponse> => {
     const { phoneNumber, email } = input;
 
+    //Check if the input is valid
     if (!phoneNumber && !email) {
-        return null;
+        throw new Error("Either email or phoneNumber must be provided");
     }
 
-    const contact = await prisma.contact.findFirst({
+    //Find all contacts that have the same email OR phone number
+    const matchedContacts = await prisma.contact.findMany({
         where: {
             OR: [
                 ...(phoneNumber ? [{ phoneNumber }] : []),
@@ -49,17 +46,118 @@ export const findExistingContact = async (input: CheckContactInput): Promise<Con
         }
     });
 
-    return contact;
-};
+    //If no matching contacts found, create a new primary contact
+    if (matchedContacts.length === 0) {
+        const newContact = await prisma.contact.create({
+            data: {
+                email,
+                phoneNumber,
+                linkPrecedence: 'primary'
+            }
+        });
 
-export const identifyContact = async (input: CheckContactInput): Promise<IdentifyResponse> => {
-    //Currently just returns a dummy response
+        return {
+            contact: {
+                primaryContactId: newContact.id,
+                emails: newContact.email ? [newContact.email] : [],
+                phoneNumbers: newContact.phoneNumber ? [newContact.phoneNumber] : [],
+                secondaryContactIds: []
+            }
+        };
+    }
+
+    //Match found. Collect all unique related IDs to find the entire group of contacts
+    const contactIds = new Set<number>();
+    matchedContacts.forEach(contact => {
+        contactIds.add(contact.id);
+        if (contact.linkedId !== null) {
+            //This is useful when a contact is linked to another contact from another cluster
+            //Example: Contact A is linked to Contact B, and Contact B is linked to Contact C
+            //If we find Contact A, we need to find Contact B and Contact C as well
+            contactIds.add(contact.linkedId);
+        }
+    });
+
+    const contactIdsArray = Array.from(contactIds);
+
+    //Fetch the entire cluster of contacts
+    const clusterContacts = await prisma.contact.findMany({
+        where: {
+            OR: [
+                { id: { in: contactIdsArray } },
+                { linkedId: { in: contactIdsArray } }
+            ]
+        }
+    });
+
+    //Determine the oldest contact to act as the true "primary"
+    clusterContacts.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    const primaryContact = clusterContacts[0];
+
+    //Demote any other primary contacts (or contacts linked to other primaries) to secondary
+    const idsToUpdate: number[] = [];
+    clusterContacts.forEach(contact => {
+        if (contact.id !== primaryContact.id && (contact.linkPrecedence === 'primary' || contact.linkedId !== primaryContact.id)) {
+            idsToUpdate.push(contact.id);
+            // Updating local array state for later processing without refetching
+            contact.linkPrecedence = 'secondary';
+            contact.linkedId = primaryContact.id;
+        }
+    });
+
+    if (idsToUpdate.length > 0) {
+        await prisma.contact.updateMany({
+            where: {
+                id: { in: idsToUpdate }
+            },
+            data: {
+                linkPrecedence: 'secondary',
+                linkedId: primaryContact.id,
+                updatedAt: new Date()
+            }
+        });
+    }
+
+    //Check if we need to create a new secondary contact (new information introduced)
+    const hasNewEmail = email && !clusterContacts.some(c => c.email === email);
+    const hasNewPhone = phoneNumber && !clusterContacts.some(c => c.phoneNumber === phoneNumber);
+    const hasNewInfo = hasNewEmail || hasNewPhone;
+
+    if (hasNewInfo) {
+        const newSecondary = await prisma.contact.create({
+            data: {
+                email,
+                phoneNumber,
+                linkedId: primaryContact.id,
+                linkPrecedence: 'secondary'
+            }
+        });
+        clusterContacts.push(newSecondary);
+    }
+
+    //Construct the final response payload
+    const emails = new Set<string>();
+    const phoneNumbers = new Set<string>();
+    const secondaryContactIds: number[] = [];
+
+    //Ensure primary contact info is added first to preserve ordering
+    if (primaryContact.email) emails.add(primaryContact.email);
+    if (primaryContact.phoneNumber) phoneNumbers.add(primaryContact.phoneNumber);
+
+    clusterContacts.forEach(contact => {
+        if (contact.id !== primaryContact.id) {
+            secondaryContactIds.push(contact.id);
+        }
+        if (contact.email) emails.add(contact.email);
+        if (contact.phoneNumber) phoneNumbers.add(contact.phoneNumber);
+    });
+
     return {
         contact: {
-            primaryContactId: 0,
-            emails: [],
-            phoneNumbers: [],
-            secondaryContactIds: []
+            primaryContactId: primaryContact.id,
+            emails: Array.from(emails),
+            phoneNumbers: Array.from(phoneNumbers),
+            secondaryContactIds
         }
     };
 };
