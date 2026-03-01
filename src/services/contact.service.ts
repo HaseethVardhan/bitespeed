@@ -1,12 +1,4 @@
 import { prisma } from '../config/database';
-import { Contact } from '@prisma/client';
-
-interface CreateContactInput {
-    phoneNumber?: string;
-    email?: string;
-    linkedId?: number;
-    linkPrecedence: 'primary' | 'secondary';
-}
 
 interface CheckContactInput {
     phoneNumber?: string;
@@ -21,12 +13,6 @@ export interface IdentifyResponse {
         secondaryContactIds: number[];
     };
 }
-
-export const createContact = async (input: CreateContactInput): Promise<Contact> => {
-    return prisma.contact.create({
-        data: input
-    });
-};
 
 export const identifyContact = async (input: CheckContactInput): Promise<IdentifyResponse> => {
     const { phoneNumber, email } = input;
