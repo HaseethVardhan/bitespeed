@@ -99,9 +99,13 @@ export const identifyContact = async (input: CheckContactInput): Promise<Identif
 
                 const clusterContacts = Array.from(allContactsMap.values());
 
-                // Determine the oldest contact to act as the true "primary"
-                clusterContacts.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-                const primaryContact = clusterContacts[0];
+                // Determine the oldest contact to act as the true "primary" (O(N) operation to avoid event loop blocking)
+                let primaryContact = clusterContacts[0];
+                for (let i = 1; i < clusterContacts.length; i++) {
+                    if (clusterContacts[i].createdAt.getTime() < primaryContact.createdAt.getTime()) {
+                        primaryContact = clusterContacts[i];
+                    }
+                }
 
                 // Demote any other primary contacts (or contacts linked to other primaries) to secondary
                 const idsToUpdate: number[] = [];
