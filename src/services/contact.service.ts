@@ -1,4 +1,5 @@
 import { prisma } from '../config/database';
+import { getCachedResponse, setCachedResponse, invalidateCluster } from './cache.service';
 
 interface CheckContactInput {
     phoneNumber?: string;
@@ -22,6 +23,15 @@ export const identifyContact = async (input: CheckContactInput): Promise<Identif
         throw new Error("Either email or phoneNumber must be provided");
     }
 
+    // 1. Check if we have a cached response for this exact input
+    const cachedResponse = await getCachedResponse(email, phoneNumber);
+    if (cachedResponse) {
+        console.log(`Cache HIT for map ${email}-${phoneNumber}`);
+        return cachedResponse;
+    }
+
+    console.log(`Cache MISS for map ${email}-${phoneNumber}`);
+
     //Find all contacts that have the same email OR phone number
     const matchedContacts = await prisma.contact.findMany({
         where: {
@@ -42,7 +52,7 @@ export const identifyContact = async (input: CheckContactInput): Promise<Identif
             }
         });
 
-        return {
+        const finalResponse = {
             contact: {
                 primaryContactId: newContact.id,
                 emails: newContact.email ? [newContact.email] : [],
@@ -50,6 +60,11 @@ export const identifyContact = async (input: CheckContactInput): Promise<Identif
                 secondaryContactIds: []
             }
         };
+
+        // Cache this new record (we know there are no other clusters involved)
+        await setCachedResponse(email, phoneNumber, finalResponse, newContact.id);
+
+        return finalResponse;
     }
 
     //Match found. Collect all unique related IDs to find the entire group of contacts
@@ -138,7 +153,7 @@ export const identifyContact = async (input: CheckContactInput): Promise<Identif
         if (contact.phoneNumber) phoneNumbers.add(contact.phoneNumber);
     });
 
-    return {
+    const finalResponse = {
         contact: {
             primaryContactId: primaryContact.id,
             emails: Array.from(emails),
@@ -146,4 +161,14 @@ export const identifyContact = async (input: CheckContactInput): Promise<Identif
             secondaryContactIds
         }
     };
+
+    // Before returning, optionally invalidate the cache if we mutated the cluster
+    if (idsToUpdate.length > 0 || hasNewInfo) {
+        await invalidateCluster(primaryContact.id);
+    }
+
+    // Finally, cache the newly generated response
+    await setCachedResponse(email, phoneNumber, finalResponse, primaryContact.id);
+
+    return finalResponse;
 };
